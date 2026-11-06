@@ -1,0 +1,392 @@
+{
+  "name": "02 - Human Approval + Verified Send",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "approve-send",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ad8ec31b-5715-5873-bc4b-6b43900251e6",
+      "name": "Approval Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -496,
+        1152
+      ],
+      "webhookId": "03fd62b4-2e1b-588d-ae16-47eff99e9c9f"
+    },
+    {
+      "parameters": {
+        "jsCode": "const config={ownerEmail:'OWNER_EMAIL@example.com',bookingUrl:'https://example.com',sheetId:'REPLACE_WITH_GOOGLE_SHEET_ID',sheetName:'Leads',errorSheetName:'Errors',mode:'HUMAN_APPROVAL',timezone:'Asia/Kolkata',followUp1Days:1,followUp2Days:3,followUp3Days:7,aiApiUrl:'https://generativelanguage.googleapis.com/v1beta/models',aiModel:'gemini-3.5-flash-lite',senderEmail:'OWNER_EMAIL@example.com',n8nBaseUrl:'https://YOUR_N8N_HOST',approveSendPath:'approve-send'}; const q=$json.query||{}; return [{json:{config,leadId:String(q.leadId||'').trim(),token:String(q.token||'').trim()}}];"
+      },
+      "id": "5fcc06ce-2854-5a9d-a6bd-9addb50c35c5",
+      "name": "Config + Extract Params",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        1152
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "p1",
+              "leftValue": "={{ $json.leadId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "p2",
+              "leftValue": "={{ $json.token }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b23b8487-0325-51d0-bc08-7209dd5db07e",
+      "name": "Params Present?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        1152
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: false, message: 'Missing leadId or token' } }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "c1f24a19-44ce-511c-9ab4-074fc77815e8",
+      "name": "Respond - Missing Params",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        1344
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Lead ID",
+              "lookupValue": "={{ $json.leadId }}"
+            }
+          ]
+        }
+      },
+      "id": "bd0030f9-e14c-5e35-b873-fb627813a522",
+      "name": "Find Lead By ID",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const req=$('Config + Extract Params').first().json; const rows=$input.all(); const row=rows.length?rows[0].json:null; if(!row||!row['Lead ID']) return [{json:{...req,eligible:false,reason:'Lead not found'}}]; const reasons=[]; if(String(row['Approval Token']||'')!==req.token) reasons.push('Invalid or already-consumed token'); if((row.Status||'')!=='PENDING_APPROVAL') reasons.push('Lead is not pending approval'); if(String(row['Opted Out']).toLowerCase()==='true') reasons.push('Lead opted out'); if(String(row['Reply Detected']).toLowerCase()==='true') reasons.push('Lead already replied'); if(!row['Draft Subject']||!row['Draft Body']) reasons.push('No draft found'); return [{json:{...req,row,eligible:reasons.length===0,reason:reasons.join('; ')}}];"
+      },
+      "id": "5eb8ddc9-474e-5037-ab59-81b8af1e09f7",
+      "name": "Fresh Eligibility Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "e1",
+              "leftValue": "={{ $json.eligible }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7f0f73fe-4da0-50c7-ae5b-a1946bb58e34",
+      "name": "Eligible?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        704,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: false, leadId: $json.leadId, message: $json.reason } }}",
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "id": "91379aa8-3e92-543c-b1b2-5dd342a699f8",
+      "name": "Respond - Not Eligible",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        1264
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.row.Email }}",
+        "subject": "={{ $json.row['Draft Subject'] }}",
+        "emailType": "text",
+        "message": "={{ $json.row['Draft Body'] }}",
+        "options": {}
+      },
+      "id": "7e9c79db-bca9-5876-ac7c-1f011bd92f74",
+      "name": "Send Approved Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        960,
+        960
+      ],
+      "webhookId": "5ef67f00-cebb-5ded-be8b-d91c5ec5f5c5"
+    },
+    {
+      "parameters": {
+        "jsCode": "const now=new Date().toISOString(); const row=$json.row; const next=new Date(Date.now()+$json.config.followUp1Days*86400000).toISOString(); return [{json:{...$json,updateRow:{'Lead ID':row['Lead ID'],'Updated At':now,'Status':'CONTACTED','First Contacted At':row['First Contacted At']||now,'Last Contacted At':now,'Next Follow-Up At':next,'Follow-Up Count':0,'Approval Token':''}}}];"
+      },
+      "id": "af1f56bf-9192-5444-9214-856b131756aa",
+      "name": "Consume Token + Build Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.config.sheetName }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "Lead ID"
+          ],
+          "value": {
+            "Lead ID": "={{ $json.updateRow['Lead ID'] }}",
+            "Updated At": "={{ $json.updateRow['Updated At'] }}",
+            "Status": "={{ $json.updateRow['Status'] }}",
+            "First Contacted At": "={{ $json.updateRow['First Contacted At'] }}",
+            "Last Contacted At": "={{ $json.updateRow['Last Contacted At'] }}",
+            "Next Follow-Up At": "={{ $json.updateRow['Next Follow-Up At'] }}",
+            "Approval Token": "={{ $json.updateRow['Approval Token'] }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "2392bb7e-23d3-5a53-80ff-8bd0c6201581",
+      "name": "Update Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1440,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, message: 'Email sent successfully', leadId: $json.updateRow['Lead ID'] } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "6811a407-bf3b-5cb8-b323-f7d9aef8bd40",
+      "name": "Respond - Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        960
+      ]
+    }
+  ],
+  "connections": {
+    "Approval Webhook": {
+      "main": [
+        [
+          {
+            "node": "Config + Extract Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config + Extract Params": {
+      "main": [
+        [
+          {
+            "node": "Params Present?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Params Present?": {
+      "main": [
+        [
+          {
+            "node": "Find Lead By ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Missing Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Lead By ID": {
+      "main": [
+        [
+          {
+            "node": "Fresh Eligibility Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fresh Eligibility Check": {
+      "main": [
+        [
+          {
+            "node": "Eligible?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eligible?": {
+      "main": [
+        [
+          {
+            "node": "Send Approved Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Not Eligible",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Approved Email": {
+      "main": [
+        [
+          {
+            "node": "Consume Token + Build Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consume Token + Build Update": {
+      "main": [
+        [
+          {
+            "node": "Update Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Lead": {
+      "main": [
+        [
+          {
+            "node": "Respond - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "tags": []
+}
+
