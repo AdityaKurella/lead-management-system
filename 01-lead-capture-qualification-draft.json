@@ -1,0 +1,1148 @@
+{
+  "name": "01 - Lead Capture + AI Qualification + Draft",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-capture",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "989d3be8-80d3-5014-a9a0-bd6eddcea1dd",
+      "name": "Lead Capture Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1632,
+        -160
+      ],
+      "webhookId": "8bedf7b3-10ad-5e10-b6ec-c934a63a7573"
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = {\n  ownerEmail: 'OWNER_EMAIL@example.com', bookingUrl: 'https://example.com',\n  sheetId: 'REPLACE_WITH_GOOGLE_SHEET_ID', sheetName: 'Leads', errorSheetName: 'Errors',\n  mode: 'HUMAN_APPROVAL', timezone: 'Asia/Kolkata', followUp1Days: 1, followUp2Days: 3, followUp3Days: 7,\n  aiApiUrl: 'https://generativelanguage.googleapis.com/v1beta/models', aiModel: 'gemini-3.5-flash-lite',\n  senderEmail: 'OWNER_EMAIL@example.com', n8nBaseUrl: 'https://YOUR_N8N_HOST', approveSendPath: 'approve-send'\n};\nconst body = $json.body || $json || {};\nconst clean = v => v == null ? '' : String(v).trim();\nconst firstName=clean(body.firstName), lastName=clean(body.lastName), email=clean(body.email).toLowerCase();\nconst lead={leadId:'',timestamp:new Date().toISOString(),firstName,lastName,fullName:[firstName,lastName].filter(Boolean).join(' '),email,\nphone:clean(body.phone),company:clean(body.company),website:clean(body.website),message:clean(body.message),service:clean(body.service),source:clean(body.source)||'Website',\nstatus:'NEW',leadScore:0,leadPriority:'',intent:'',fit:'',qualificationReason:'',aiSummary:'',recommendedAction:'',firstContactedAt:'',lastContactedAt:'',nextFollowUpAt:'',followUpCount:0,replyDetected:false,optedOut:false};\nlead.leadId='LEAD-'+Date.now().toString(36).toUpperCase()+Math.random().toString(36).slice(2,8).toUpperCase();\nreturn [{json:{config,lead,ai:{},validation:{},approvalToken:''}}];"
+      },
+      "id": "f49a0725-41e4-5cde-aef4-e31b614712af",
+      "name": "Config + Normalize Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1392,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.lead.email }}",
+              "rightValue": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            },
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.lead.message }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5f4fc63e-1aae-54a9-85a8-fbcfd41264b4",
+      "name": "Has Valid Email + Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1152,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date().toISOString();\nreturn [{ json: { config: $json.config, errorRow: {\n  Timestamp: now,\n  Workflow: '01 - Lead Capture',\n  Stage: 'Validation',\n  LeadId: $json.lead ? $json.lead.leadId : '',\n  Email: $json.lead ? $json.lead.email : '',\n  ErrorMessage: 'Missing or invalid email address',\n  RawPayload: JSON.stringify($json.lead || {})\n} } }];"
+      },
+      "id": "feaad06b-9216-5819-8360-5b1b9b48a99d",
+      "name": "Build Validation Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -912,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.config.errorSheetName }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "4e48378c-0c4d-5fda-84fc-c57b23d73e53",
+      "name": "Log Validation Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: false, error: 'Missing or invalid required field: email' } }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "f614a262-9247-5156-a4a0-d3ff19363fe6",
+      "name": "Respond - Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -432,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Email",
+              "lookupValue": "={{ $json.lead.email }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0eb718f9-cd4f-5d78-93ef-6c2a831cf57b",
+      "name": "Find Existing Lead By Email",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -912,
+        -320
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const original=$('Has Valid Email + Message?').first().json;\nconst rows=$input.all(); const match=rows.length ? rows[0].json : null;\nlet lead={...original.lead}; let isDuplicate=false; let existingStatus='NEW';\nif(match && match['Lead ID']){ isDuplicate=true; existingStatus=match['Status']||'NEW'; lead={...lead,leadId:match['Lead ID'],\n firstName:lead.firstName||match['First Name']||'',lastName:lead.lastName||match['Last Name']||'',company:lead.company||match['Company']||'',website:lead.website||match['Website']||'',message:lead.message||match['Message']||'',service:lead.service||match['Service']||'',\n status:existingStatus,followUpCount:Number(match['Follow-Up Count']||0),replyDetected:String(match['Reply Detected']).toLowerCase()==='true',optedOut:String(match['Opted Out']).toLowerCase()==='true',firstContactedAt:match['First Contacted At']||'',lastContactedAt:match['Last Contacted At']||'',nextFollowUpAt:match['Next Follow-Up At']||''};\n lead.fullName=[lead.firstName,lead.lastName].filter(Boolean).join(' ');\n}\nconst alreadyProcessed=isDuplicate && existingStatus!=='NEW';\nreturn [{json:{...original,lead,isDuplicate,alreadyProcessed}}];"
+      },
+      "id": "7e995c61-ecc5-5f33-939a-0fa0c4e80ce4",
+      "name": "Merge Duplicate State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "d1",
+              "leftValue": "={{ $json.alreadyProcessed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f955cebb-8e57-5394-9ead-ecce623a43db",
+      "name": "Already Processed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -432,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, leadId: $json.lead.leadId, status: $json.lead.status, message: 'Lead already processed - no duplicate outreach created' } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "64f793fd-4aed-54f4-b028-33b600d2ab99",
+      "name": "Respond - Duplicate, No Action",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -192,
+        -464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $json.lead;\nconst prompt = `You are a conservative B2B lead qualification analyst. Using ONLY the information supplied below, score this lead. Do not invent facts. Respond with ONLY a JSON object, no markdown, matching exactly this shape: {\\\"score\\\":0,\\\"priority\\\":\\\"HOT|WARM|COLD\\\",\\\"intent\\\":\\\"HIGH|MEDIUM|LOW\\\",\\\"fit\\\":\\\"GOOD|POSSIBLE|POOR\\\",\\\"reason\\\":\\\"\\\",\\\"summary\\\":\\\"\\\",\\\"recommendedAction\\\":\\\"\\\"}. Scoring guide: 80-100 HOT, 50-79 WARM, 0-49 COLD. Consider urgency, budget signals, clarity of the service request, and business fit.\\n\\nName: ${lead.fullName || '(not provided)'}\\nCompany: ${lead.company || '(not provided)'}\\nService requested: ${lead.service || '(not provided)'}\\nWebsite: ${lead.website || '(not provided)'}\\nMessage: ${lead.message || '(not provided)'}`;\nreturn [{ json: { ...$json, aiPrompt: prompt } }];"
+      },
+      "id": "1aaf6b0e-fee7-5834-98ba-5034ab98b9c4",
+      "name": "Build Qualification Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -192,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.config.aiApiUrl + '/' + $json.config.aiModel + ':generateContent' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  contents: [\n    {\n      parts: [\n        {\n          text: $json.aiPrompt\n        }\n      ]\n    }\n  ],\n  generationConfig: {\n    responseMimeType: \"application/json\",\n    temperature: 0.3\n  }\n}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "a17bfd5c-63dd-5455-a0b4-484adbf2c913",
+      "name": "Gemini - Qualify Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        48,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Build Qualification Prompt').first().json;\nlet parsed = null;\nlet parseError = '';\ntry {\n  const text = $json.candidates[0].content.parts[0].text;\n  parsed = JSON.parse(text);\n} catch (e) {\n  parseError = 'Gemini qualification response could not be parsed: ' + e.message;\n}\nif (!parsed || typeof parsed.score !== 'number') {\n  parseError = parseError || 'Gemini qualification response missing required fields';\n  parsed = { score: 0, priority: 'COLD', intent: 'LOW', fit: 'POOR', reason: 'AI qualification failed - needs manual review', summary: '', recommendedAction: 'Manual review required' };\n}\nreturn [{ json: { ...prev, ai: { ...prev.ai, qualification: parsed }, qualificationError: parseError } }];"
+      },
+      "id": "d2ebb050-01a1-50f3-a8f6-1826d3600cb7",
+      "name": "Parse Qualification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "q1",
+              "leftValue": "={{ $json.qualificationError }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4ab9fc65-497d-50a4-afd0-daad8c53343c",
+      "name": "Qualification Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        496,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.config.errorSheetName }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "1f375e89-578a-59d0-91c5-2820d189517e",
+      "name": "Log Qualification Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        640,
+        -432
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const q = $json.ai.qualification;\nlet score = Math.max(0, Math.min(100, Number(q.score) || 0));\nlet priority = score >= 80 ? 'HOT' : (score >= 50 ? 'WARM' : 'COLD');\nconst lead = {\n  ...$json.lead,\n  status: 'QUALIFIED',\n  leadScore: score,\n  leadPriority: priority,\n  intent: q.intent || '',\n  fit: q.fit || '',\n  qualificationReason: q.reason || '',\n  aiSummary: q.summary || '',\n  recommendedAction: q.recommendedAction || ''\n};\nreturn [{ json: { ...$json, lead } }];"
+      },
+      "id": "ce67e258-931f-54ff-8aca-bc3582d7fb3e",
+      "name": "Apply Lead Scoring",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.config.sheetName }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "Lead ID"
+          ],
+          "value": {
+            "Lead ID": "={ $json[\"Lead ID\"] }",
+            "Created At": "={ $json[\"Created At\"] }",
+            "Updated At": "={ $json[\"Updated At\"] }",
+            "First Name": "={ $json[\"First Name\"] }",
+            "Last Name": "={ $json[\"Last Name\"] }",
+            "Email": "={ $json[\"Email\"] }",
+            "Phone": "={ $json[\"Phone\"] }",
+            "Company": "={ $json[\"Company\"] }",
+            "Website": "={ $json[\"Website\"] }",
+            "Message": "={ $json[\"Message\"] }",
+            "Service": "={ $json[\"Service\"] }",
+            "Source": "={ $json[\"Source\"] }",
+            "Lead Score": "={ $json[\"Lead Score\"] }",
+            "Priority": "={ $json[\"Priority\"] }",
+            "Intent": "={ $json[\"Intent\"] }",
+            "Fit": "={ $json[\"Fit\"] }",
+            "AI Summary": "={ $json[\"AI Summary\"] }",
+            "Qualification Reason": "={ $json[\"Qualification Reason\"] }",
+            "Status": "={ $json[\"Status\"] }",
+            "First Contacted At": "={ $json[\"First Contacted At\"] }",
+            "Last Contacted At": "={ $json[\"Last Contacted At\"] }",
+            "Next Follow-Up At": "={ $json[\"Next Follow-Up At\"] }",
+            "Follow-Up Count": "={ $json[\"Follow-Up Count\"] }",
+            "Reply Detected": "={ $json[\"Reply Detected\"] }",
+            "Opted Out": "={ $json[\"Opted Out\"] }",
+            "Approval Token": "={ $json[\"Approval Token\"] }",
+            "Draft Subject": "={ $json[\"Draft Subject\"] }",
+            "Draft Body": "={ $json[\"Draft Body\"] }",
+            "Owner Notified": "={ $json[\"Owner Notified\"] }"
+          },
+          "options": {}
+        },
+        "options": {}
+      },
+      "id": "df71eec4-07ad-5f66-85c3-a72d5314f273",
+      "name": "Persist Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1216,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead={leadId:$json['Lead ID'],timestamp:$json['Created At'],firstName:$json['First Name'],lastName:$json['Last Name'],fullName:`${$json['First Name']||''} ${$json['Last Name']||''}`.trim(),email:$json.Email,phone:$json.Phone,company:$json.Company,website:$json.Website,message:$json.Message,service:$json.Service,source:$json.Source,leadScore:$json['Lead Score'],leadPriority:$json.Priority,intent:$json.Intent,fit:$json.Fit,aiSummary:$json['AI Summary'],qualificationReason:$json['Qualification Reason']};\nconst config={ownerEmail:'OWNER_EMAIL@example.com',bookingUrl:'https://example.com',senderEmail:'OWNER_EMAIL@example.com',sheetId:'REPLACE_WITH_GOOGLE_SHEET_ID',sheetName:'Leads',errorSheetName:'Errors',mode:'HUMAN_APPROVAL',n8nBaseUrl:'https://YOUR_N8N_HOST',approveSendPath:'approve-send'};\nconst aiPrompt=`Write a short professional B2B outreach email. Use ONLY these facts. Do not invent facts. Mention the requested service and one relevant detail. Include one clear next step. No markdown. Return ONLY JSON: {\"subject\":\"\",\"body\":\"\"}.\\n\\nName: ${lead.fullName||'(not provided)'}\\nCompany: ${lead.company||'(not provided)'}\\nService: ${lead.service||'(not provided)'}\\nMessage: ${lead.message||'(not provided)'}\\nPriority: ${lead.leadPriority||'(not provided)'}`;\nreturn [{json:{...$json,config,lead,aiPrompt}}];"
+      },
+      "id": "1076fce5-2e17-5600-8f59-a7a59ca8381e",
+      "name": "Build Email Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({contents:[{parts:[{text:$json.aiPrompt}]}],generationConfig:{responseMimeType:\"application/json\",temperature:0.3}}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "b8a621d4-66b3-507c-8577-97de05e7403b",
+      "name": "Gemini - Generate Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1696,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev=$('Build Email Prompt').first().json; let parsed=null,err='';\ntry{parsed=JSON.parse($json.candidates[0].content.parts[0].text);}catch(e){err='Gemini email response could not be parsed: '+e.message;}\nif(!parsed||!parsed.subject||!parsed.body) err=err||'Gemini email response missing subject/body';\nreturn [{json:{...prev,draft:parsed,emailError:err}}];"
+      },
+      "id": "53c84379-6094-5ae9-8acc-94244604e972",
+      "name": "Parse AI Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1936,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "e1",
+              "leftValue": "={{ $json.emailError }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "606c81e1-1767-56e3-ba0a-800a0bba0b25",
+      "name": "Email Generated OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2176,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.config.errorSheetName }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "f95a3f62-ea5b-55d3-a6ed-e33c2449d3ea",
+      "name": "Log Email Generation Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2416,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: false, leadId: $json.lead.leadId, error: 'AI email generation failed - lead saved, draft not created. Check Errors sheet.' } }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "3862a479-6194-5fc9-bbc5-3e3ab8900419",
+      "name": "Respond - Email Generation Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2672,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "m1",
+              "leftValue": "={{ $json.config.mode }}",
+              "rightValue": "HUMAN_APPROVAL",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "684c44d3-9b57-5db0-b77f-47605294b6db",
+      "name": "Mode = HUMAN_APPROVAL?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2416,
+        -304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const token=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2); return [{json:{...$json,approvalToken:token}}];"
+      },
+      "id": "aa65c06b-ab1d-54b0-957f-03bdec36ec61",
+      "name": "Generate Approval Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2656,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead={...$json.lead,status:'PENDING_APPROVAL'}; const approvalToken=$json.approvalToken||''; const approvalUrl=`${$json.config.n8nBaseUrl}/webhook/${$json.config.approveSendPath}?leadId=${encodeURIComponent(lead.leadId)}&token=${encodeURIComponent(approvalToken)}`; return [{json:{...$json,lead,approvalToken,approvalUrl}}];"
+      },
+      "id": "52f0fae5-128b-5e69-bb7a-fc0b80219593",
+      "name": "Prepare Draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2896,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.config.sheetName }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "Lead ID"
+          ],
+          "value": {
+            "Lead ID": "={{ $json.lead.leadId }}",
+            "Updated At": "={{ new Date().toISOString() }}",
+            "Status": "={{ $json.lead.status }}",
+            "Approval Token": "={{ $json.approvalToken }}",
+            "Draft Subject": "={{ $json.draft.subject }}",
+            "Draft Body": "={{ $json.draft.body }}",
+            "Owner Notified": "=false"
+          },
+          "options": {}
+        },
+        "options": {}
+      },
+      "id": "25227a2a-1ada-50a8-9928-f5e183cd1066",
+      "name": "Persist Draft + Token",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3136,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "OWNER_EMAIL@example.com",
+        "subject": "=Approval needed: {{ $('Prepare Draft').item.json.lead.leadPriority }} lead - {{ $('Prepare Draft').item.json.lead.fullName || $('Prepare Draft').item.json.lead.email }}",
+        "emailType": "text",
+        "message": "=New {{ $('Prepare Draft').item.json.lead.leadPriority }} lead ({{ $('Prepare Draft').item.json.lead.leadScore }}/100)\n\nName: {{ $('Prepare Draft').item.json.lead.fullName }}\nCompany: {{ $('Prepare Draft').item.json.lead.company }}\nService: {{ $('Prepare Draft').item.json.lead.service }}\nAI summary: {{ $('Prepare Draft').item.json.lead.aiSummary }}\n\n--- Draft Subject ---\n{{ $('Prepare Draft').item.json.draft.subject }}\n\n--- Draft Body ---\n{{ $('Prepare Draft').item.json.draft.body }}\n\nApprove and send: {{ $('Prepare Draft').item.json.approvalUrl }}",
+        "options": {}
+      },
+      "id": "b1cb911b-646c-5e7c-98f7-779321360d62",
+      "name": "Notify Owner - Approval Needed",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3376,
+        -416
+      ],
+      "webhookId": "d2d354a0-59f5-5705-802b-8d86561b26c2"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, leadId: $('Prepare Draft').item.json.lead.leadId, status: 'PENDING_APPROVAL', priority: $('Prepare Draft').item.json.lead.leadPriority } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "4f8ee785-9e43-593e-b13e-e666540279c8",
+      "name": "Respond - Pending Approval",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3616,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.lead.email }}",
+        "subject": "={{ $json.draft.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.draft.body }}",
+        "options": {}
+      },
+      "id": "9f0399f2-c64b-5a0b-aae1-e2a6e0097ffa",
+      "name": "Gmail - Auto Send Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2656,
+        -176
+      ],
+      "webhookId": "943059b7-5f7b-5010-93f2-c789638b5218"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.config.sheetName }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "Lead ID"
+          ],
+          "value": {
+            "Lead ID": "={{ $json.lead.leadId }}",
+            "Updated At": "={{ new Date().toISOString() }}",
+            "Status": "CONTACTED",
+            "First Contacted At": "={{ new Date().toISOString() }}",
+            "Last Contacted At": "={{ new Date().toISOString() }}",
+            "Next Follow-Up At": "={{ new Date(Date.now()+$json.config.followUp1Days*86400000).toISOString() }}",
+            "Follow-Up Count": "=0",
+            "Approval Token": "",
+            "Draft Subject": "={{ $json.draft.subject }}",
+            "Draft Body": "={{ $json.draft.body }}"
+          },
+          "options": {}
+        },
+        "options": {}
+      },
+      "id": "feada3aa-5bb7-5743-8201-c2b14561055a",
+      "name": "Update Lead - Auto Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2896,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, leadId: $json.lead.leadId, status: 'CONTACTED', priority: $json.lead.leadPriority } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "2ca6cef3-3d60-59c2-9302-c467ca562bcd",
+      "name": "Respond - Auto Sent",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3136,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead=$json.lead||{};\nreturn [{json:{...$json,\n  'Lead ID':lead.leadId||'','Created At':lead.timestamp||'','Updated At':new Date().toISOString(),\n  'First Name':lead.firstName||'','Last Name':lead.lastName||'','Email':lead.email||'','Phone':lead.phone||'',\n  'Company':lead.company||'','Website':lead.website||'','Message':lead.message||'','Service':lead.service||'','Source':lead.source||'',\n  'Lead Score':lead.leadScore??0,'Priority':lead.leadPriority||'','Intent':lead.intent||'','Fit':lead.fit||'',\n  'AI Summary':lead.aiSummary||'','Qualification Reason':lead.qualificationReason||'','Status':lead.status||'NEW',\n  'First Contacted At':lead.firstContactedAt||'','Last Contacted At':lead.lastContactedAt||'','Next Follow-Up At':lead.nextFollowUpAt||'',\n  'Follow-Up Count':lead.followUpCount??0,'Reply Detected':lead.replyDetected??false,'Opted Out':lead.optedOut??false,\n  'Approval Token':'','Draft Subject':'','Draft Body':'','Owner Notified':false\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        -176
+      ],
+      "id": "c774be93-be47-5b95-8f6e-64bfe7907c42",
+      "name": "Prepare Lead For Sheet"
+    }
+  ],
+  "connections": {
+    "Lead Capture Webhook": {
+      "main": [
+        [
+          {
+            "node": "Config + Normalize Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config + Normalize Lead": {
+      "main": [
+        [
+          {
+            "node": "Has Valid Email + Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Valid Email + Message?": {
+      "main": [
+        [
+          {
+            "node": "Find Existing Lead By Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Validation Error": {
+      "main": [
+        [
+          {
+            "node": "Log Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Validation Error": {
+      "main": [
+        [
+          {
+            "node": "Respond - Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Existing Lead By Email": {
+      "main": [
+        [
+          {
+            "node": "Merge Duplicate State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Duplicate State": {
+      "main": [
+        [
+          {
+            "node": "Already Processed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already Processed?": {
+      "main": [
+        [
+          {
+            "node": "Respond - Duplicate, No Action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Qualification Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Qualification Prompt": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Qualify Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Qualify Lead": {
+      "main": [
+        [
+          {
+            "node": "Parse Qualification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Qualification": {
+      "main": [
+        [
+          {
+            "node": "Qualification Error?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualification Error?": {
+      "main": [
+        [
+          {
+            "node": "Log Qualification Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Apply Lead Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Qualification Error": {
+      "main": [
+        [
+          {
+            "node": "Apply Lead Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Lead Scoring": {
+      "main": [
+        [
+          {
+            "node": "Prepare Lead For Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Email Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Email Prompt": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Generate Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Generate Email": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Email": {
+      "main": [
+        [
+          {
+            "node": "Email Generated OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Generated OK?": {
+      "main": [
+        [
+          {
+            "node": "Mode = HUMAN_APPROVAL?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Email Generation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Email Generation Error": {
+      "main": [
+        [
+          {
+            "node": "Respond - Email Generation Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mode = HUMAN_APPROVAL?": {
+      "main": [
+        [
+          {
+            "node": "Generate Approval Token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail - Auto Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Approval Token": {
+      "main": [
+        [
+          {
+            "node": "Prepare Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Draft": {
+      "main": [
+        [
+          {
+            "node": "Persist Draft + Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Draft + Token": {
+      "main": [
+        [
+          {
+            "node": "Notify Owner - Approval Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Owner - Approval Needed": {
+      "main": [
+        [
+          {
+            "node": "Respond - Pending Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Auto Send Email": {
+      "main": [
+        [
+          {
+            "node": "Update Lead - Auto Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Lead - Auto Sent": {
+      "main": [
+        [
+          {
+            "node": "Respond - Auto Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Lead For Sheet": {
+      "main": [
+        [
+          {
+            "node": "Persist Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "tags": []
+}
+
