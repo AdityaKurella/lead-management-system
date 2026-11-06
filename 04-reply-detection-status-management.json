@@ -1,0 +1,399 @@
+{
+  "name": "04 - Reply Detection + Status Management",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "in:inbox -in:sent newer_than:1d"
+        },
+        "options": {}
+      },
+      "id": "94784a4c-f765-514d-bbd2-91e69e9cf742",
+      "name": "Gmail Trigger - New Reply",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        688,
+        2464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const config={ownerEmail:'OWNER_EMAIL@example.com',bookingUrl:'https://example.com',sheetId:'REPLACE_WITH_GOOGLE_SHEET_ID',sheetName:'Leads',errorSheetName:'Errors',mode:'HUMAN_APPROVAL',timezone:'Asia/Kolkata',followUp1Days:1,followUp2Days:3,followUp3Days:7,aiApiUrl:'https://generativelanguage.googleapis.com/v1beta/models',aiModel:'gemini-3.5-flash-lite',senderEmail:'OWNER_EMAIL@example.com',n8nBaseUrl:'https://YOUR_N8N_HOST',approveSendPath:'approve-send'}; const msg=$json; const from=(msg.from&&msg.from.value&&msg.from.value[0]&&msg.from.value[0].address)||msg.From||''; const senderEmail=String(from).toLowerCase().trim(); if(senderEmail===config.senderEmail.toLowerCase()) return []; return [{json:{config,senderEmail,snippet:msg.snippet||msg.textPlain||msg.text||'',subject:msg.subject||msg.Subject||''}}];"
+      },
+      "id": "b217af39-3c18-5f45-90f2-958c14071223",
+      "name": "Config + Extract Sender",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        2464
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Email",
+              "lookupValue": "={{ $json.senderEmail }}"
+            }
+          ]
+        }
+      },
+      "id": "1acd2007-1961-50cf-a023-dc1c7974845e",
+      "name": "Find Lead By Email",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1200,
+        2464
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "l1",
+              "leftValue": "={{ $json['Lead ID'] }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "92bf8196-8121-5155-a6c3-15bf43543e98",
+      "name": "Lead Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        2480
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "3a2fb381-48e8-55b3-b968-7c30b324f778",
+      "name": "No Matching Lead - Stop",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1824,
+        2656
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Config + Extract Sender').first().json;\nconst row = $json;\nconst prompt = `Classify this email reply from a sales lead. Respond with ONLY JSON: {\\\"replied\\\":true,\\\"sentiment\\\":\\\"POSITIVE|NEUTRAL|NEGATIVE\\\",\\\"intent\\\":\\\"INTERESTED|QUESTION|NOT_INTERESTED|UNSUBSCRIBE|OTHER\\\",\\\"summary\\\":\\\"\\\",\\\"recommendedAction\\\":\\\"\\\"}.\\n\\nOriginal service requested: ${row['Service'] || '(not provided)'}\\nReply subject: ${prev.subject}\\nReply text: ${prev.snippet}`;\nreturn [{ json: { config: prev.config, row, aiPrompt: prompt } }];"
+      },
+      "id": "5e958e50-77f2-5878-942b-622990647879",
+      "name": "Build Classification Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        2368
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.config.aiApiUrl }}/{{ $json.config.aiModel }}:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({contents:[{parts:[{text: $json.aiPrompt}]}], generationConfig:{responseMimeType:'application/json', temperature:0.3}}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "8e2f0572-66be-54fb-8a59-2e348a9506a1",
+      "name": "Gemini - Classify Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2016,
+        2368
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Build Classification Prompt').first().json;\nlet parsed = null; let err = '';\ntry {\n  const text = $json.candidates[0].content.parts[0].text;\n  parsed = JSON.parse(text);\n} catch (e) { err = 'Reply classification failed to parse: ' + e.message; }\nif (!parsed || !parsed.intent) {\n  err = err || 'Reply classification missing intent';\n  parsed = { replied: true, sentiment: 'NEUTRAL', intent: 'OTHER', summary: 'Could not auto-classify - manual review needed', recommendedAction: 'Manual review' };\n}\nreturn [{ json: { config: prev.config, row: prev.row, classification: parsed, classificationError: err } }];"
+      },
+      "id": "7fc7b05a-4bbf-5687-adba-f31cdfd42f39",
+      "name": "Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        2368
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const c = $json.classification;\nconst row = $json.row;\nconst now = new Date().toISOString();\nlet status = 'REPLIED';\nlet optedOut = String(row['Opted Out']).toLowerCase() === 'true';\nlet notifyOwner = false;\n\nif (c.intent === 'UNSUBSCRIBE') {\n  status = 'DO_NOT_CONTACT';\n  optedOut = true;\n  notifyOwner = true;\n} else if (c.intent === 'INTERESTED' || c.sentiment === 'POSITIVE') {\n  status = 'REPLIED_POSITIVE';\n  notifyOwner = true;\n} else if (c.intent === 'QUESTION') {\n  status = 'REPLIED';\n  notifyOwner = true;\n} else {\n  status = 'REPLIED';\n  notifyOwner = false;\n}\n\nreturn [{ json: { ...$json, notifyOwner, updateRow: {\n  'Lead ID': row['Lead ID'],\n  'Updated At': now,\n  'Status': status,\n  'Reply Detected': true,\n  'Opted Out': optedOut,\n  'Next Follow-Up At': '',\n  'AI Summary': c.summary || row['AI Summary'] || ''\n} } }];"
+      },
+      "id": "3e2e20a9-c403-503a-8829-54f1e11de23c",
+      "name": "Determine Status Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2496,
+        2368
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "n1",
+              "leftValue": "={{ $json.notifyOwner }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b950f8f4-2176-5042-8126-b3c4b38cc4a1",
+      "name": "Notify Owner?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2976,
+        2368
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.config.ownerEmail }}",
+        "subject": "=Lead reply: {{ $json.row['First Name'] }} {{ $json.row['Last Name'] }} - {{ $json.updateRow['Status'] }}",
+        "emailType": "text",
+        "message": "=Status: {{ $json.updateRow['Status'] }}\nSentiment: {{ $json.classification.sentiment }}\nIntent: {{ $json.classification.intent }}\nSummary: {{ $json.classification.summary }}\nRecommended action: {{ $json.classification.recommendedAction }}",
+        "options": {}
+      },
+      "id": "4ea620d7-645d-5c3d-9d61-ea0ba797fc38",
+      "name": "Notify Owner - Reply Received",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3248,
+        2352
+      ],
+      "webhookId": "0aa9a140-b5a6-513d-80e1-3b49396796bb"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.config.sheetName }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "Lead ID"
+          ],
+          "value": {
+            "Lead ID": "={{ $json.updateRow['Lead ID'] }}",
+            "Updated At": "={{ $json.updateRow['Updated At'] }}",
+            "Status": "={{ $json.updateRow['Status'] }}",
+            "Reply Detected": "={{ $json.updateRow['Reply Detected'] }}",
+            "Opted Out": "={{ $json.updateRow['Opted Out'] }}",
+            "Next Follow-Up At": "={{ $json.updateRow['Next Follow-Up At'] }}",
+            "AI Summary": "={{ $json.updateRow['AI Summary'] }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "901842a0-6a67-5eb9-81c2-7ec5741c179a",
+      "name": "Update Lead2",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2736,
+        2368
+      ]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger - New Reply": {
+      "main": [
+        [
+          {
+            "node": "Config + Extract Sender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config + Extract Sender": {
+      "main": [
+        [
+          {
+            "node": "Find Lead By Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Lead By Email": {
+      "main": [
+        [
+          {
+            "node": "Lead Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Found?": {
+      "main": [
+        [
+          {
+            "node": "Build Classification Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Matching Lead - Stop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Classification Prompt": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Classify Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Classify Reply": {
+      "main": [
+        [
+          {
+            "node": "Parse Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Classification": {
+      "main": [
+        [
+          {
+            "node": "Determine Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Status Update": {
+      "main": [
+        [
+          {
+            "node": "Update Lead2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Owner?": {
+      "main": [
+        [
+          {
+            "node": "Notify Owner - Reply Received",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Lead2": {
+      "main": [
+        [
+          {
+            "node": "Notify Owner?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "tags": []
+}
+
