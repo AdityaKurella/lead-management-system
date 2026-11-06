@@ -1,0 +1,395 @@
+{
+  "name": "03 - Automated Follow-Up Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "3c1e435c-3639-59eb-9015-299e5c3b1631",
+      "name": "Every Hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -192,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = {\n  \"ownerEmail\": \"OWNER_EMAIL@example.com\",\n  \"bookingUrl\": \"https://example.com\",\n  \"sheetId\": \"REPLACE_WITH_GOOGLE_SHEET_ID\",\n  \"sheetName\": \"Leads\",\n  \"errorSheetName\": \"Errors\",\n  \"mode\": \"HUMAN_APPROVAL\",\n  \"timezone\": \"Asia/Kolkata\",\n  \"followUp1Days\": 1,\n  \"followUp2Days\": 3,\n  \"followUp3Days\": 7,\n  \"aiApiUrl\": \"https://generativelanguage.googleapis.com/v1beta/models\",\n  \"aiModel\": \"gemini-3.5-flash-lite\",\n  \"senderEmail\": \"OWNER_EMAIL@example.com\",\n  \"n8nBaseUrl\": \"https://YOUR_N8N_HOST\",\n  \"approveSendPath\": \"approve-send\"\n};\nreturn [{json:{config}}];"
+      },
+      "id": "0a68bb91-1c3a-5e01-a0f0-b084effcc762",
+      "name": "Build Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.config.sheetName }}",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "af56e50c-8db1-550b-b965-8815f6b4fe3f",
+      "name": "Read All Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        288,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $('Build Config').first().json.config;\nconst now = Date.now();\nconst STOP_STATUSES = ['CLOSED','WON','LOST','DO_NOT_CONTACT','REPLIED','REPLIED_POSITIVE'];\nconst results = [];\nfor (const item of $input.all()) {\n  const row = item.json;\n  const status = row['Status'] || '';\n  const replyDetected = String(row['Reply Detected']).toLowerCase() === 'true';\n  const optedOut = String(row['Opted Out']).toLowerCase() === 'true';\n  const followUpCount = Number(row['Follow-Up Count'] || 0);\n  const nextFollowUpAt = row['Next Follow-Up At'];\n\n  if (replyDetected || optedOut) continue;\n  if (STOP_STATUSES.includes(status)) continue;\n  if (status !== 'CONTACTED' && !status.startsWith('FOLLOW_UP_')) continue;\n  if (followUpCount >= 3) continue;\n  if (!nextFollowUpAt) continue;\n  if (new Date(nextFollowUpAt).getTime() > now) continue;\n\n  const nextStage = followUpCount + 1; // 1, 2 or 3\n  results.push({ json: { config, row, nextStage } });\n}\nreturn results;"
+      },
+      "id": "dd018d6e-b0cf-5ba9-a7ff-367c324f2e4a",
+      "name": "Filter Eligible + Determine Stage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        528,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $json.row;\nconst stage = $json.nextStage;\nconst prompt = `Write a short, polite, professional follow-up email (follow-up #${stage} of 3) for a lead who has not replied yet. Do not repeat previous wording, do not sound pushy or spammy, keep it concise (3-5 sentences). Never invent facts. Respond with ONLY JSON: {\\\"subject\\\":\\\"\\\",\\\"body\\\":\\\"\\\"}.\\n\\nLead name: ${row['First Name'] || '(unknown)'}\\nCompany: ${row['Company'] || '(not provided)'}\\nService originally requested: ${row['Service'] || '(not provided)'}\\nOriginal message: ${row['Message'] || '(not provided)'}\\nThis is follow-up number ${stage}.`;\nreturn [{ json: { ...$json, aiPrompt: prompt } }];"
+      },
+      "id": "6b44616a-dd3e-55d9-9361-9e049f3c03c3",
+      "name": "Build Follow-up Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.config.aiApiUrl }}/{{ $json.config.aiModel }}:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({contents:[{parts:[{text: $json.aiPrompt}]}], generationConfig:{responseMimeType:'application/json', temperature:0.3}}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "0582297a-45c7-59e1-9605-fa4d7c4463d2",
+      "name": "Gemini - Generate Follow-up",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1008,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Build Follow-up Prompt').first().json;\nlet parsed = null; let err = '';\ntry {\n  const text = $json.candidates[0].content.parts[0].text;\n  parsed = JSON.parse(text);\n} catch (e) { err = 'Follow-up generation failed to parse: ' + e.message; }\nif (!parsed || !parsed.subject || !parsed.body) err = err || 'Follow-up response missing subject/body';\nreturn [{ json: { ...prev, draft: parsed, fuError: err } }];"
+      },
+      "id": "df45a88d-75f5-59f5-968b-0529fd7e6f96",
+      "name": "Parse Follow-up Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "f1",
+              "leftValue": "={{ $json.fuError }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "22f9b9d0-d622-5ff1-a499-0640c85d47de",
+      "name": "Follow-up Parsed OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1488,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.config.errorSheetName }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ new Date().toISOString() }}",
+            "Workflow": "03 - Follow-Up Engine",
+            "Stage": "Gemini Follow-up Generation",
+            "LeadId": "={{ $json.row['Lead ID'] }}",
+            "Email": "={{ $json.row['Email'] }}",
+            "ErrorMessage": "={{ $json.fuError }}",
+            "RawPayload": "={{ JSON.stringify($json.row) }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "2a69d2cc-1db5-5fce-a89d-577ff0554352",
+      "name": "Log Follow-up Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1888,
+        2000
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.row.Email }}",
+        "subject": "={{ $json.draft.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.draft.body }}",
+        "options": {}
+      },
+      "id": "7adea3c8-7a1f-53f3-84f8-056ff73356d9",
+      "name": "Send Follow-up Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1728,
+        1728
+      ],
+      "webhookId": "5d3404f2-9ad8-5d17-89c8-b21ee2c5cede"
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $json.config;\nconst row = $json.row;\nconst stage = $json.nextStage;\nconst now = new Date().toISOString();\nconst days = stage === 1 ? config.followUp1Days : (stage === 2 ? config.followUp2Days : config.followUp3Days);\nconst isLast = stage >= 3;\nconst nextFollowUpAt = isLast ? '' : new Date(Date.now() + days*86400000).toISOString();\nreturn [{ json: { ...$json, updateRow: {\n  'Lead ID': row['Lead ID'],\n  'Updated At': now,\n  'Status': 'FOLLOW_UP_' + stage,\n  'Last Contacted At': now,\n  'Next Follow-Up At': nextFollowUpAt,\n  'Follow-Up Count': stage\n} } }];"
+      },
+      "id": "04763441-be45-5d18-bc07-eb013686e4ca",
+      "name": "Compute Next Follow-up State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1968,
+        1728
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.config.sheetName }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "Lead ID"
+          ],
+          "value": {
+            "Lead ID": "={{ $json.updateRow['Lead ID'] }}",
+            "Updated At": "={{ $json.updateRow['Updated At'] }}",
+            "Status": "={{ $json.updateRow['Status'] }}",
+            "Last Contacted At": "={{ $json.updateRow['Last Contacted At'] }}",
+            "Next Follow-Up At": "={{ $json.updateRow['Next Follow-Up At'] }}",
+            "Follow-Up Count": "={{ $json.updateRow['Follow-Up Count'] }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "9efc0497-80b9-5b90-ac54-d363f36423d7",
+      "name": "Update Lead1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2208,
+        1728
+      ]
+    }
+  ],
+  "connections": {
+    "Every Hour": {
+      "main": [
+        [
+          {
+            "node": "Build Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Config": {
+      "main": [
+        [
+          {
+            "node": "Read All Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read All Leads": {
+      "main": [
+        [
+          {
+            "node": "Filter Eligible + Determine Stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Eligible + Determine Stage": {
+      "main": [
+        [
+          {
+            "node": "Build Follow-up Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Follow-up Prompt": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Generate Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Generate Follow-up": {
+      "main": [
+        [
+          {
+            "node": "Parse Follow-up Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Follow-up Email": {
+      "main": [
+        [
+          {
+            "node": "Follow-up Parsed OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Follow-up Parsed OK?": {
+      "main": [
+        [
+          {
+            "node": "Send Follow-up Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Follow-up Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Follow-up Email": {
+      "main": [
+        [
+          {
+            "node": "Compute Next Follow-up State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Next Follow-up State": {
+      "main": [
+        [
+          {
+            "node": "Update Lead1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "tags": []
+}
+
